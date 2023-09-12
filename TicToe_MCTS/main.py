@@ -100,7 +100,7 @@ game_env.print_board()
 model.load_state_dict(torch.load('hardest_trained_model.pt')) #HERE ENTER MODEL YOU WANT TO TEST
 model.eval()
 
-MCTS = MCTS(game_env,4,"rollouts",budget = 1,neural_network=None,dirichlet_alpha=1)
+MCTS = MCTS(game_env,4,"rollouts",budget = 1000,neural_network=None,dirichlet_alpha=1)
 #BUDGET OF 2000 should perform perfect, budget=1 is basically random agent.
 node1 = Node(game_env.state,None)
 
@@ -114,8 +114,7 @@ for i in range(10):
     played_moves = []
     game_env.print_board()
     while not game_env.outcome:
-        
-       
+
         if player=='1':
             plt.clf()
             tensor_state = torch.tensor(game_env.state.astype(np.float32)).unsqueeze(0)

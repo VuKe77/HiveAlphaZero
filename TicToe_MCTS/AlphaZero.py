@@ -114,7 +114,7 @@ class AlphaZero:
         every move is in format [state of game, posterior action probs, reward] 
         """
         starting_time = time.time()
-        memory = []
+        self_play_buffer = []
         for i in range(self.args["num_self_play_iterations"]):
             #Prepare loop for new gameplay
             self.game.reset()
@@ -154,7 +154,7 @@ class AlphaZero:
                     else:
                         raise ValueError("Uncategorized winner!")
 
-            memory.append(one_game_data) #Add game trajectory to memory
+            self_play_buffer+=one_game_data #Add game trajectory to memory
                 
             
         if verbose:
@@ -163,7 +163,7 @@ class AlphaZero:
             print(f"Time needed: {delta_time:.2f}s ")
             
         
-        return memory
+        return self_play_buffer
             
     def _train(self, memory):
         """
@@ -176,10 +176,10 @@ class AlphaZero:
         cumalative_loss=[[],[]] #Used for plotting loss curve, first array is policy lost, second is value loss
 
         #shuffle training data
-        training_data = np.concatenate(memory[-self.args['num_self_play_iterations']:],dtype=object)
-        random.shuffle(training_data)
-        for batch_idx in range(0,len(training_data),self.args['batch_size']):
-            sample = training_data[batch_idx:min(len(training_data),batch_idx+self.args['batch_size'])]
+        #training_data = memory
+        random.shuffle(memory)
+        for batch_idx in range(0,len(memory),self.args['batch_size']):
+            sample = memory[batch_idx:min(len(memory),batch_idx+self.args['batch_size'])]
             states, policy_targets, value_targets = zip(*sample)
             states, policy_targets, value_targets = np.array(states), np.array(policy_targets), np.array(value_targets).reshape(-1,1) #TODO:need this?
             
@@ -458,9 +458,9 @@ if __name__ == "__main__":
         "MCTS_constraint": "rollouts",
         "MCTS_budget": 200,
         "MCTS_dirichlet_alpha": 1,
-        "num_self_play_iterations":200,
+        "num_self_play_iterations":4,
         "max_moves_num": 10,
-        "num_learning_iterations": 15,
+        "num_learning_iterations": 5,
         "num_epochs": 3,
         "batch_size":64,
         "num_evaluation_games":0

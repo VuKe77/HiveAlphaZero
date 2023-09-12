@@ -174,6 +174,8 @@ class MCTS:
         for i,child in enumerate(node.children):
             if self.neural_net:
                 UCT_scores[i] = self._calculate_UCT_score(child,noise[i])
+            else:
+                UCT_scores[i] = self._calculate_UCT_score(child,None)
         
         argmax = np.argmax(UCT_scores)
         #self.visited_nodes.append(node.children[argmax])
