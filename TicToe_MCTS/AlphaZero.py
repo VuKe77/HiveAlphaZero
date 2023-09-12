@@ -210,9 +210,9 @@ class AlphaZero:
         this process is repeated is defined by 'num_learning_iterations'. If loss_verbose is True,
         and the end of every learning epoch loss curve is plotted
         """
-        average_policy_loss_vector = []
-        average_value_loss_vector = []
-        reward_history=[]
+        average_policy_loss_vector = [] #Policy loss is accumulated during training phase and than averaged and appended to this vector
+        average_value_loss_vector = [] #Value loss is accumulated during training phase and than averaged and appended to this vector
+        reward_history=[] #After every learning iterations games are played 10 against random agent, and final reward is appended to this vector
         for iter in tqdm(range(self.args['num_learning_iterations'])):
             torch.save(self.model.state_dict(),f"best_model")
             torch.save(self.optimizer.state_dict(), f"best_optimizer")
@@ -230,22 +230,24 @@ class AlphaZero:
                average_value_loss_vector.append(average_loss[1])
             #Play with old model to evaluate NN
             self._evaluate_NN()
-            #reward = self._play_against_random()#NOT READY YET. SOON
-            #reward_history.append(reward) 
 
-        #Save best model, save loss values during training, and plot loss curve    
+            #Play 10 games against random agent in order to evaluate network later
+            reward = self._play_against_random()
+            reward_history.append(reward) 
+
+        #Save best model, save loss values during training, save rewards, and plot loss and reward.   
         torch.save(self.model.state_dict(),f"best_model")
         torch.save(self.optimizer.state_dict(), f"best_optimizer")
         with open('loss_data.npy','wb') as f:
             np.save(f,average_policy_loss_vector)
             np.save(f,average_value_loss_vector)
             np.save(f,reward_history)
-        self._plot_loss_curve(average_policy_loss_vector,average_value_loss_vector)
+        self._plot_loss_curve(average_policy_loss_vector,average_value_loss_vector,reward_history)
 
 
     def _plot_loss_curve(self,policy_loss_vector, value_loss_vector,reward=None):
         """
-        Used for potting loss functions on graph
+        Used for potting loss on graph. If reward is provided than plots reward also.
         """
         
         plt.figure()
@@ -261,7 +263,9 @@ class AlphaZero:
         #Plot reward also
         if reward:
             plt.figure()
-            plt.plot(range(1,len(policy_loss_vector)+1),reward)
+            plt.plot(range(1,len(reward)+1),reward)
+            plt.ylabel("Reward")
+            plt.xlabel("Number of learning iterations")
             plt.show()
 
         
@@ -350,27 +354,32 @@ class AlphaZero:
     
     def _play_against_random(self):
         """
-        NN plays against random agent to see how much reward will be acquierd
+        NN plays against random agent to see how much reward will be acquierd. Ten  
+        games are played. Both NN and random agent have their turns playing firs.
+        FOr every won game reward is +1, for every lost game reward is -1.  
+        Returns reward after ten games
         """
         reward=0
-        self.game.reset()
-        played_moves = []
+        
         mcts_dummy = MCTS(self.game,1.41,"rollouts",budget = 200,neural_network=None,dirichlet_alpha=1) #We need this just for action mapping function
         for i in range(10):
-            player='1'
+            if i%2==0:
+                player='1'
+                first_player = "NN"
+            else:
+                player='2'
+                first_player="RANDOM"
+            self.game.reset()
+            played_moves = []
+            #self.game.print_board()
             while not self.game.outcome:
-                self.game.print_board()
                 if player=='1':
                     tensor_state = torch.tensor(self.game.state.astype(np.float32)).unsqueeze(0)
                     policy, value =model(tensor_state)
                     value = value.item()
                     policy = policy.squeeze(0).detach().numpy()
-                    
-                    #plt.bar(range(9),policy)
-                    #plt.title(value)
-                    #plt.show()
-
                     target_index = np.argmax(policy)
+
                     while target_index in played_moves:
                         policy[target_index]=0
                         target_index=np.argmax(policy)
@@ -382,24 +391,31 @@ class AlphaZero:
                         next_state = self.game.state
                         next_state[1][target_index//3][target_index%3]=1
                         next_state[2] = np.zeros((3,3))
+
                     played_moves.append(target_index)
                     self.game.step(next_state)
-                    
                     player='2'
+
                 elif player=='2':
                     #Random move
                     available_moves = game.legal_next_states
-                    next_state = np.random.choice(available_moves)
+                    next_state = random.choice(available_moves)
                     played_moves.append(mcts_dummy._action_mapping(game.state,next_state))
                     
-                    game.step()
+                    game.step(next_state)
                     player='1'
-                game.print_board()
+                #game.print_board()
             
             if game.outcome=='player1_wins':
-                reward+=1
+                if first_player=="NN":
+                    reward+=1
+                else:
+                    reward-=1
             elif game.outcome =='player2_wins':
-                reward-=1
+                if first_player=="RANDOM":
+                    reward+=1
+                else:
+                    reward-=1
         return reward
 
         
@@ -438,15 +454,15 @@ if __name__ == "__main__":
 #MCTS_UCT_c, MCTS_constraint, MCTS_budget,num_self_play_iterations, max_moves_num
     
     args ={
-        "MCTS_UCT_c" : 1.41,
+        "MCTS_UCT_c" : 4,
         "MCTS_constraint": "rollouts",
         "MCTS_budget": 200,
         "MCTS_dirichlet_alpha": 1,
-        "num_self_play_iterations":3,
+        "num_self_play_iterations":200,
         "max_moves_num": 10,
-        "num_learning_iterations": 5,
-        "num_epochs": 2,
-        "batch_size":10,
+        "num_learning_iterations": 15,
+        "num_epochs": 3,
+        "batch_size":64,
         "num_evaluation_games":0
     }
     train_pipe = AlphaZero(model,optimizer=optim,game=game,args=args)
