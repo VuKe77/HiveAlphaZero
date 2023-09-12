@@ -18,4 +18,5 @@ While making this class I have followed the basic structure from [freeCodeCamp.o
 # Notes
 Main.py was used for various testing. Most of the code is commented, and it should be divided into sections. Type of test is mentioned at the beginning of section.  
 test_model.pt is saved model trained around 20 min.  
+hardest_trained_model.pt is model trained for 1,5h. I have tried some plays in main against random agent, when playing first wins almost every game. You can replicate games in main, just uncomment that section.  
 **NO PARALLELIZATION is yet implemented, everything runs on one CPU.**
