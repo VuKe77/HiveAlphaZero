@@ -10,7 +10,9 @@ AlphaZero.py contains few important classes:
 -ResBlock is architecture of residual layer provided to ResNet class.  
 -AlphaZero is training pipeline for AlphaZero algorithm. In AlphaZero.py I have tested out 
 training pipeline, so file is runnable, there you can try out different NN architectures and
-hyperparameters.
+hyperparameters.  
+While making this class I have followed the basic structure from [freeCodeCamp.org](https://www.youtube.com/watch?v=wuSQpLinRB4&t=9981s&ab_channel=freeCodeCamp.org) and ofcourse
+[AlphaZero algorithm](https://web.stanford.edu/~surag/posts/alphazero.html)
 
 
 # Notes
