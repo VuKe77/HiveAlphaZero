@@ -97,58 +97,72 @@ played_moves = []
 plt.figure()
 game_env.reset()
 game_env.print_board()
-model.load_state_dict(torch.load('test_model')) #HERE ENTER MODEL YOU WANT TO TEST
+model.load_state_dict(torch.load('hardest_trained_model.pt')) #HERE ENTER MODEL YOU WANT TO TEST
 model.eval()
 
-MCTS = MCTS(game_env,4,"rollouts",budget = 2000,neural_network=None,dirichlet_alpha=1)
-#BUDGET OF 2000 PERFORMS PERFECT
-node1 = Node(None,None)
+MCTS = MCTS(game_env,4,"rollouts",budget = 1,neural_network=None,dirichlet_alpha=1)
+#BUDGET OF 2000 should perform perfect, budget=1 is basically random agent.
+node1 = Node(game_env.state,None)
 
 #Model doesn't use MCTS at all for this test, just raw outputs of NN
-player ='2'#Set starting player
-while not game_env.outcome:
-    #for i in range(5):
-    plt.clf()
+
+wins = 0
+draws=0
+for i in range(10):
+    player ='1'#Set starting player, when changing starting player you need to change how is reward added at the end!
+    game_env.reset()
+    played_moves = []
     game_env.print_board()
-    if player=='1':
-        tensor_state = torch.tensor(game_env.state.astype(np.float32)).unsqueeze(0)
-        policy, value =model(tensor_state)
-        value = value.item()
-        policy = policy.squeeze(0).detach().numpy()
+    while not game_env.outcome:
         
-        plt.bar(range(9),policy)
-        plt.title(value)
+       
+        if player=='1':
+            plt.clf()
+            tensor_state = torch.tensor(game_env.state.astype(np.float32)).unsqueeze(0)
+            policy, value =model(tensor_state)
+            value = value.item()
+            policy = policy.squeeze(0).detach().numpy()
+            
+            plt.bar(range(9),policy)
+            plt.title(value)
+            
+
+            
+            target_index = np.argmax(policy)
+            while target_index in played_moves:
+                #IF move is already played find next one with biggest probability
+                policy[target_index]=0
+                target_index=np.argmax(policy)
+            if game_env.current_player(game_env.state) == 'player1':
+                next_state = game_env.state
+                next_state[0][target_index//3][target_index%3]=1
+                next_state[2] = np.ones((3,3))
+            elif game_env.current_player(game_env.state) == 'player2':
+                next_state = game_env.state
+                next_state[1][target_index//3][target_index%3]=1
+                next_state[2] = np.zeros((3,3))
+            played_moves.append(target_index)
+            #print(next_state)
+            game_env.step(next_state)
+            
+            player='2'
+        elif player=='2':
+            #human_move = get_human_input()
+            #player = '1'
+            node1 = MCTS.truncate_tree(node1)
+            node1,a1 = MCTS.search_tree(node1,True)
+            played_moves.append(MCTS._action_mapping(game_env.state,node1.state))
+            player = '1'
+            choice = node1.state  
+            game_env.step(choice)
+        game_env.print_board()
         plt.show()
-
-        
-        target_index = np.argmax(policy)
-        while target_index in played_moves:
-            #IF move is already played find next one with biggest probability
-            policy[target_index]=0
-            target_index=np.argmax(policy)
-        if game_env.current_player(game_env.state) == 'player1':
-            next_state = game_env.state
-            next_state[0][target_index//3][target_index%3]=1
-            next_state[2] = np.ones((3,3))
-        elif game_env.current_player(game_env.state) == 'player2':
-            next_state = game_env.state
-            next_state[1][target_index//3][target_index%3]=1
-            next_state[2] = np.zeros((3,3))
-        played_moves.append(target_index)
-        #print(next_state)
-        game_env.step(next_state)
-        
-        player='2'
-    elif player=='2':
-         #human_move = get_human_input()
-         #player = '1'
-         node1 = MCTS.truncate_tree(node1)
-
-         node1,a1 = MCTS.search_tree(node1,True)
-        
-         player = '1'
-         choice = node1.state  
-         game_env.step(choice)
-    game_env.print_board()
+    if game_env.outcome=="player1_wins":
+        wins+=1
+    elif game_env.outcome=="player2_wins":
+        wins-=1
+    else:
+        draws+=1
+print(f"Number of wins:{wins}")
 
 # %%
