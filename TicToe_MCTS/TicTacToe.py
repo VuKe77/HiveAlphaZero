@@ -135,7 +135,7 @@ class TicTacToe:
     def reset(self):
         """Reset the board so it's ready for the next game."""
         self.state = np.zeros((3,3,3), dtype=float)
-        self.legal_next_states = self.get_legal_next_states(self.state)
+        self.legal_next_states = self.get_legal_next_states([self.state])
         self.done = False
         self.outcome = None
         self.move_count = 0
