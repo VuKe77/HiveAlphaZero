@@ -270,7 +270,7 @@ class MCTS:
         If state_value is float we have used NN to get value approximation.
         """
         if self.neural_net and (not isinstance(state_value,str)):
-            reward = state_value
+            reward = state_value*(-1)#TODO:??????????????????????????????????
 
         else:
             #Find out who played last move, #TODO:specific to TicTacToe!
