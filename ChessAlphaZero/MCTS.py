@@ -3,6 +3,9 @@ from copy import deepcopy
 import time
 import torch
 import random
+""""
+Monte Carlo Tree Search class
+"""
 
 class MCTS:
     """
@@ -17,20 +20,12 @@ class MCTS:
     #TODO: **kwargs
     def __init__(self, game_env, UCT_c,constraint = "rollouts", budget = 2000,neural_network=None,UCT_eps=0.25,dirichlet_alpha=None):
         
-        self.game_env = game_env #game environment \
+        self.game_env = game_env #game environment 
         self.game_snapshot = None
         """
         Functions that game_env shoud have in order for compatibility:
-        self.determine_outcome([state])
-        self.get_legal_next_states([state])
-        self.current_player([state])
-        self.step(state)
-
-        Params that game_env should have:
-        self.state
-        self.done
-        self.legal_next_states
-        self.outcome
+        .step(next.action)=> gives next_state, reward, terminated(True/False)
+        .legal_actions=> returns legal actions that can be taken from current game state
         """
         self.constraint = constraint #Can be "time" or "rollouts"
         self.budget = budget #time in seconds or number of rollouts
@@ -70,11 +65,7 @@ class MCTS:
                     #expanding node for all possible actions if it isn't expanded and doing rollouts on random child or using NN 
                     self._add_leaf_nodes(next)
 
-                    if len(next.children)==0:
-                        #If node wasn't expanded, that means it is terminal. Determine outcome
-                        state_value ='alo'#SHOULDNT BE HERE!!!
-                        break
-
+                    
                     #Use NN for prediciton if possible
                     if self.neural_net:
                         #Use NN for evaluation
@@ -96,6 +87,8 @@ class MCTS:
                         
                         index = np.random.randint(0,len(next.children))
                         self.visited_nodes.append(next.children[index])
+                        next_state, n1,n2,n3=self.game_snapshot.step(next.children[index].action)
+                        next.children[index].state = next_state
                         state_value = self._random_rollout(next.children[index])
                     break
 
@@ -115,7 +108,9 @@ class MCTS:
             #TODO: CHess environment returns outcome in format:1(white wins), -1(black wins), 0(draw)
             if terminated:
                 self.visited_nodes.append(next)#If game was terminated we need to add terminal node to visited nodes
-            self._reward_backpropagation(state_value,terminated,game_outcome)
+                self._reward_backpropagation(state_value,game_outcome)
+            else:
+                self._reward_backpropagation(state_value,terminated)
             search_iteration+=1
             #Check if search exceeds computational budget
             (run_search,comp_time) = self._computational_budget(search_iteration,start_time)
@@ -161,7 +156,7 @@ class MCTS:
             most_visits_idx = np.argmax(actions) 
             best_child = root.children[most_visits_idx]
             most_visits_idx = np.argmax(action_probs)
-            action_probs = [0]*9
+            action_probs = [0]*4672 #TODO: specific to chess
             action_probs[most_visits_idx] = 1
 
         return best_child,action_probs  
@@ -282,7 +277,7 @@ class MCTS:
 
         return rollout_reward
     
-    def _reward_backpropagation(self,state_value,terminated,game_outcome):
+    def _reward_backpropagation(self,state_value,terminated):
         """
         Updates total reward and visit count of all nodes that were
         on the search path. Root included. If state_value is string
@@ -295,15 +290,15 @@ class MCTS:
         else:
             #Find out who played last move, #TODO:specific to Chess!
             last_player = self.visited_nodes[-1].state[:,:,112][0][0]#white=>1, black=>0, reffers to player who is currently on move!
-            if game_outcome==0: #game was draw
+            if state_value==0: #game was draw
                 reward=0
-            elif last_player==1 and game_outcome==1: #white node is last, white won
+            elif last_player==1 and state_value==1: #white node is last, white won
                 reward =-1
-            elif last_player==1 and game_outcome==-1:#white node is last, black won
+            elif last_player==1 and state_value==-1:#white node is last, black won
                 reward = 1
-            elif last_player==0 and game_outcome==-1:#black node is last, black won
+            elif last_player==0 and state_value==-1:#black node is last, black won
                 reward=-1
-            elif last_player==0 and game_outcome==1: #black node is last, white won
+            elif last_player==0 and state_value==1: #black node is last, white won
                 reward=1
             else:
                 raise ValueError("Invalid player!")
@@ -373,7 +368,7 @@ class Node:
         Node.index+=1 #For debugging
 
     def __repr__(self):
-        repr = "Node{},visited:{}".format(self.index,self.visit_cnt)
+        repr = "Node{},visited:{},action{}".format(self.index,self.visit_cnt,self.action)
 
         return repr
 
