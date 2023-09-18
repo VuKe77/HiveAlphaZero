@@ -72,10 +72,10 @@ class HiveAlphaZeroModel(nn.Module):
         value_fc_size: int
     ):
         """Build the torch model."""
+        state_n_channels = state_shape[2]
+
         # keras defaults
         batch_norm_kwargs = dict(eps=1e-3, momentum=0.99)
-
-        state_n_channels = state_shape[2]
 
         self.input_block = nn.Sequential(
             nn.Conv2d(state_n_channels, n_filters, padding="same", kernel_size=input_filter_size, bias=False),
