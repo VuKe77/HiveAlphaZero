@@ -120,9 +120,7 @@ class HiveAlphaZeroModel(nn.Module):
         )
 
     def forward(self, x):
-        """
-        Predict the output of policy and value functions given a state input or a batch of inputs.
-        """
+        """Predict the output of policy and value functions given a state input or a batch of inputs."""
         x = self.input_block(x)
 
         value = self.value_head(x)
