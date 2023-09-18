@@ -31,9 +31,9 @@ policy = policy.squeeze(0).detach().numpy()
 '''
 
 #%% #Testing MCTS for chess
-dummy_model = DummyNN(64)
+dummy_model = DummyNN(1,64)
 env = gym.make("ChessAlphaZero-v0")
-mcts = MCTS(env,4,"rollouts",10,neural_network=dummy_model,dirichlet_alpha=1)
+mcts = MCTS(env,4,"rollouts",1000,neural_network=dummy_model,dirichlet_alpha=1)
 initial_state = env.reset()
 node1 = Node(initial_state,None)
 action_taken=None
