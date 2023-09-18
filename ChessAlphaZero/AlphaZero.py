@@ -32,8 +32,8 @@ class DummyNN(nn.Module):
             nn.BatchNorm2d(num_hidden),
             nn.ReLU(),
             nn.Flatten(),
-            nn.Linear(num_hidden*8*8,4672),
-            nn.Softmax(dim=1)
+            nn.Linear(num_hidden*8*8,4672)
+            
         )
         self.valueHead = nn.Sequential(
             nn.Conv2d(num_hidden,3,kernel_size=3,padding=1),
@@ -112,8 +112,8 @@ class AlphaZero:
         self_play_buffer = self_play_pool.map(self._self_play,self_play_indices)
         self_play_pool.close()
         self_play_pool.join()
-        merged_data=[]
-        
+
+        merged_data=[]     
         #merge games together
         for game in self_play_buffer:
             merged_data+=game
@@ -483,13 +483,13 @@ if __name__ == "__main__":
         "MCTS_constraint": "rollouts",
         "MCTS_budget": 100,
         "MCTS_dirichlet_alpha": 1,
-        "num_self_play_iterations":98,
-        "max_moves_num": 45,
-        "num_learning_iterations": 5,
+        "num_self_play_iterations":28,
+        "max_moves_num": 65,
+        "num_learning_iterations": 3,
         "num_epochs": 5,
         "batch_size":64,
-        "num_evaluation_games":10,
-        "num_games_against_random":10
+        "num_evaluation_games":0,
+        "num_games_against_random":5
     }
     #Save training hyperparamaters
     model_saving_path = Utils.create_model_folder(args)
