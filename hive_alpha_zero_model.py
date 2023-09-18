@@ -33,10 +33,13 @@ class ResidualBlock(nn.Module):
 
         return x
 
-# @todo:
-#   - l2 kernel regularization (available in Keras as layer parameter, in torch param for optimizer)
-#   - play with (decrease?) hyperparameters (n_filters, n_res_layers, value_fc_size)
-#   - change action shape from 22x22x7 to 22x22x6?
+"""
+@todo:
+   - l2 kernel regularization (available in Keras as layer parameter, in torch param for optimizer)
+   - play with (decrease?) hyperparameters (n_filters, n_res_layers, value_fc_size)
+       - also batch_norm_kwargs - we're using keras defaults; maybe change to torch defaults?
+   - change action shape from 22x22x7 to 22x22x6?
+"""
 class HiveAlphaZeroModel(nn.Module):
     """Class for predicting the output of policy and value functions given a Hive board state."""
     def __init__(
