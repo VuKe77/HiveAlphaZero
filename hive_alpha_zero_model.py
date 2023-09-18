@@ -8,6 +8,14 @@ import numpy as np
 from torch import nn
 import torch.nn.functional as F
 
+"""
+@todo:
+   - l2 kernel regularization (available in Keras as layer parameter, in torch param for optimizer)
+   - play with (decrease?) hyperparameters (n_filters, n_res_layers, value_fc_size)
+       - also batch_norm_kwargs - we're using keras defaults; maybe change to torch defaults?
+   - change action shape from 22x22x7 to 22x22x6?
+"""
+
 class ResidualBlock(nn.Module):
     """A single block of residual layers."""
     def __init__(self, n_filters: int, filter_size: int, **batch_norm_kwargs) -> None:
@@ -33,13 +41,6 @@ class ResidualBlock(nn.Module):
 
         return x
 
-"""
-@todo:
-   - l2 kernel regularization (available in Keras as layer parameter, in torch param for optimizer)
-   - play with (decrease?) hyperparameters (n_filters, n_res_layers, value_fc_size)
-       - also batch_norm_kwargs - we're using keras defaults; maybe change to torch defaults?
-   - change action shape from 22x22x7 to 22x22x6?
-"""
 class HiveAlphaZeroModel(nn.Module):
     """Class for predicting the output of policy and value functions given a Hive board state."""
     def __init__(
@@ -120,8 +121,7 @@ class HiveAlphaZeroModel(nn.Module):
 
     def forward(self, x):
         """
-        Predict the output of policy and value functions
-        given a state input or a batch of inputs.
+        Predict the output of policy and value functions given a state input or a batch of inputs.
         """
         x = self.input_block(x)
 
