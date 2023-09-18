@@ -89,7 +89,7 @@ class HiveAlphaZeroModel(nn.Module):
 
         self.res_blocks = nn.ModuleList((
             ResidualBlock(n_filters, filter_size, **batch_norm_kwargs)
-            for _ in n_res_layers
+            for _ in range(n_res_layers)
         ))
 
         state_plane_size = np.prod(state_shape[:2])
