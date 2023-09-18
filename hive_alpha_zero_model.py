@@ -28,6 +28,7 @@ class ResidualBlock(nn.Module):
         self.batch_norm_2 = nn.BatchNorm2d(n_filters, **batch_norm_kwargs)
 
     def forward(self, x):
+        """Forward the input of the residual block."""
         residual = x
 
         x = self.batch_norm_1(self.conv_1(x))
