@@ -18,7 +18,7 @@ import torch.nn.functional as F
 
 class ResidualBlock(nn.Module):
     """A single block of residual layers."""
-    def __init__(self, n_filters: int, filter_size: int, **batch_norm_kwargs) -> None:
+    def __init__(self, n_filters: int, filter_size: int, **batch_norm_kwargs):
         super().__init__()
 
         self.conv_1 = nn.Conv2d(n_filters, n_filters, kernel_size=filter_size, padding="same", bias=False)
