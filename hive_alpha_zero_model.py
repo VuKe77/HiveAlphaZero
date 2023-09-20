@@ -15,6 +15,8 @@ import torch.nn.functional as F
         - also batch_norm_kwargs - we're using keras defaults; maybe change to torch defaults?
     - change action shape from 22x22x7 to 22x22x6?
     - circular padding in input layer
+    - consider changing shapes of input and output (it should be channel first instead of last?)
+        ^ fixed, let's see if it works
 """
 
 class ResidualBlock(nn.Module):
@@ -47,8 +49,8 @@ class HiveAlphaZeroModel(nn.Module):
     """Class for predicting the output of policy and value functions given a Hive board state."""
     def __init__(
         self,
-        state_shape=(23,23,18),
-        action_prob_shape=(22,22,7),
+        state_shape=(18,23,23),
+        action_prob_shape=(7,22,22),
         policy_n_filters=2,
         value_n_filters=4,
         n_filters=256,
@@ -78,7 +80,7 @@ class HiveAlphaZeroModel(nn.Module):
         value_fc_size: int
     ):
         """Build the torch model."""
-        state_n_channels = state_shape[2]
+        state_n_channels = state_shape[0]
 
         # keras defaults
         batch_norm_kwargs = dict(eps=1e-3, momentum=0.99)
@@ -94,7 +96,7 @@ class HiveAlphaZeroModel(nn.Module):
             for _ in range(n_res_layers)
         ))
 
-        state_plane_size = np.prod(state_shape[:2])
+        state_plane_size = np.prod(state_shape[1:])
 
         policy_n_inputs = policy_n_filters * state_plane_size
 
