@@ -45,11 +45,11 @@ class DummyNN(nn.Module):
         )
 
     def forward(self,x):
-       # print(f"In Model: input size: {x.size()}")
+        print(f"In Model: input size: {x.size()}")
         x = self.startBlock(x)
         policy = self.policyHead(x)
         value = self.valueHead(x)
-       # print(f"Out Model: output size: {value.size()}")
+        print(f"Out Model: output size: {value.size()}")
         return policy, value
 class DummyResBlock(nn.Module):
     """
@@ -250,10 +250,11 @@ def play_against_random(game_id,game_env_ref,nn_ref,args_ref):
 
 
 class AlphaZero:
-    def __init__(self,model, optimizer, game,device, args,model_saving_path):
+    def __init__(self,model, optimizer, game,device,cpu_device, args,model_saving_path):
         """
         Training pipeline class for AlphaZero alghorihm.
         """
+        self.cpu_device = cpu_device
         self.device = device 
         self.model = model
         self.old_model = None 
@@ -278,52 +279,7 @@ class AlphaZero:
         -num_games_against_random: number of games played against random agent in order to check reward
 
         ''' 
-    def _parallel_self_play(self):
-        """
-        Performs number of self-play games defined in args["num_self_play_iterations"]. Every self-play game has early  
-        termination if number of moves exceeds args["max_move_num"] . Returns vector containing every game trajectory, where  
-        every move is in format [state of game, posterior action probs, reward]. Data acquisition is done in parallel using
-        multiple python processes.
-        """
-        time1 = time.time()
-        print("Self-playing phase starts...")
-        #Utilising resources
-        workers = round(mp.cpu_count()*0.5)
-        if workers>self.args["num_self_play_iterations"]:
-            workers = self.args["num_self_play_iterations"]
-        print(f"Using {workers} CPU cores...")
-        #Rounding batch size in order to fully utilise resources
-        BATCH_SIZE = self.args["num_self_play_iterations"]//workers*workers #batch size is number of self played games
-
-        #Run multiple processes and acquire data
-        not_ready =[] 
-        ready=[]
-        data = []
-        model_ref = ray.put(self.model)
-        game_ref = ray.put(self.game)
-        args_ref = ray.put(self.args)
-        games_played = 0
-
-        while(games_played<BATCH_SIZE):
-            if len(not_ready)>=workers:
-                ready, not_ready = ray.wait(not_ready,num_returns=1)
-                data+=deepcopy(ray.get(ready[0]))
-
-            not_ready.append(self_play.remote(games_played+1,game_ref,model_ref,args_ref))
-            games_played+=1
-
-        #Get remaining  data
-        for i in range(workers):
-            data+=deepcopy(ray.get(not_ready[i]))
-        #del ready
-        #del not_ready
-        #del dummy_model_ref
-        #del game_ref
-        print(f"Self-play finished. Played out {BATCH_SIZE} games.")
-        print(f"Time needed for {BATCH_SIZE} games is: {time.time()-time1:.2f}s")
-        return data
-
-   
+ 
     def _train(self, memory):
         """
         Here is NN trained on memory data in batches of size args['batch_size'].
@@ -357,8 +313,8 @@ class AlphaZero:
             policy_loss = F.cross_entropy(out_policy,policy_targets)
             value_loss = F.mse_loss(out_value, value_targets)
             loss = policy_loss+value_loss
-            cumalative_loss[0].append(policy_loss.to(cpu_dev).detach().numpy())  #used for plotting loss curve
-            cumalative_loss[1].append(value_loss.to(cpu_dev).detach().numpy())  #used for plotting loss curve
+            cumalative_loss[0].append(policy_loss.to(self.cpu_device).detach().numpy())  #used for plotting loss curve
+            cumalative_loss[1].append(value_loss.to(self.cpu_device).detach().numpy())  #used for plotting loss curve
 
             #Backpropegate
             self.optimizer.zero_grad()
@@ -377,9 +333,10 @@ class AlphaZero:
         average_policy_loss_vector = [] #Policy loss is accumulated during training phase and than averaged and appended to this vector
         average_value_loss_vector = [] #Value loss is accumulated during training phase and than averaged and appended to this vector
         reward_history=[] #After every learning iterations games are played 10 against random agent, and final reward is appended to this vector
-        self.model.to(cpu_dev) #Before start of the loop move model to CPU
+        self.model.module.cpu() #Before start of the loop move model to CPU
+        self.model.module.eval()
         print("Moved model to cpu")
-        print(next(model.parameters()).device)
+        print(next(model.module.parameters()).device)
         for iter in tqdm(range(self.args['num_learning_iterations'])):
             
             torch.save(self.model.state_dict(),os.path.join(self.model_saving_path,"best_model"))
@@ -394,10 +351,10 @@ class AlphaZero:
             
             
             #Train model on gathered data
-            self.model.to(self.device)#Move model to GPU for training
+            self.model.module.to(self.device)#Move model to GPU for training
             print("Moved model to GPU")
-            print(next(model.parameters()).device)
-            self.model.train()   
+            print(next(model.module.parameters()).device)
+            self.model.module.train()   
             print("Learning phase starts...")
             for epoch in range(self.args["num_epochs"]):
                average_loss = self._train(memory)
@@ -405,7 +362,8 @@ class AlphaZero:
                average_value_loss_vector.append(average_loss[1])
 
             #Play with old model to evaluate NN
-            self.model.to(cpu_dev) #Move model to CPU for evaluation
+            self.model.module.cpu() #Move model to CPU for evaluation
+            self.model.module.eval()
             print("Moved model to CPU")
             print(next(model.parameters()).device)
             if self._evaluate_NN_parallel():
@@ -424,6 +382,50 @@ class AlphaZero:
         torch.save(self.model.state_dict(),os.path.join(self.model_saving_path,"best_model"))
         torch.save(self.optimizer.state_dict(),os.path.join(self.model_saving_path,"best_optimizer"))
        
+    def _parallel_self_play(self):
+        """
+        Performs number of self-play games defined in args["num_self_play_iterations"]. Every self-play game has early  
+        termination if number of moves exceeds args["max_move_num"] . Returns vector containing every game trajectory, where  
+        every move is in format [state of game, posterior action probs, reward]. Data acquisition is done in parallel using
+        multiple python processes.
+        """
+        time1 = time.time()
+        print("Self-playing phase starts...")
+        #Utilising resources
+        workers = round(mp.cpu_count()*0.5)
+        if workers>self.args["num_self_play_iterations"]:
+            workers = self.args["num_self_play_iterations"]
+        print(f"Using {workers} CPU cores...")
+        #Rounding batch size in order to fully utilise resources
+        BATCH_SIZE = self.args["num_self_play_iterations"]//workers*workers #batch size is number of self played games
+
+        #Run multiple processes and acquire data
+        not_ready =[] 
+        ready=[]
+        data = []
+        model_ref = ray.put(self.model.module)
+        game_ref = ray.put(self.game)
+        args_ref = ray.put(self.args)
+        games_played = 0
+
+        while(games_played<BATCH_SIZE):
+            if len(not_ready)>=workers:
+                ready, not_ready = ray.wait(not_ready,num_returns=1)
+                data+=deepcopy(ray.get(ready[0]))
+
+            not_ready.append(self_play.remote(games_played+1,game_ref,model_ref,args_ref))
+            games_played+=1
+
+        #Get remaining  data
+        for i in range(workers):
+            data+=deepcopy(ray.get(not_ready[i]))
+        #del ready
+        #del not_ready
+        #del dummy_model_ref
+        #del game_ref
+        print(f"Self-play finished. Played out {BATCH_SIZE} games.")
+        print(f"Time needed for {BATCH_SIZE} games is: {time.time()-time1:.2f}s")
+        return data
 
     def _evaluate_NN_parallel(self):
         """
@@ -463,7 +465,7 @@ class AlphaZero:
         not_ready =[] 
         ready=[]
         rewards = []
-        new_model_ref = ray.put(self.model)
+        new_model_ref = ray.put(self.model.module)
         old_model_ref = ray.put(self.old_model)
         game_ref = ray.put(self.game)
         args_ref = ray.put(mcts_args)
@@ -497,17 +499,13 @@ class AlphaZero:
             print(f"Saving new model as best")
         else:
             print(f"Saving old model as best")
-            self.model = self.old_model
+            self.model.module = self.old_model
             self.optimizer.load_state_dict(torch.load("best_optimizer"))
             new_model_better = False
         self.old_model=None
 
         return new_model_better
-
-    
-    
-
-    
+  
     def _play_against_random_parallel(self):
         """
         Plays out args["num_games_against_random"] against random agent in parallel
@@ -538,7 +536,7 @@ class AlphaZero:
         not_ready =[] 
         ready=[]
         rewards= []
-        model_ref = ray.put(self.model)
+        model_ref = ray.put(self.model.module)
         game_ref = ray.put(self.game)
         args_ref = ray.put(mcts_args)
         games_played = 0
@@ -581,10 +579,13 @@ if __name__ == "__main__":
 
     cpu_dev = torch.device("cpu")
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    
     model = DummyNN(10,64)
-    #if torch.cuda.device_count() > 1:
-    #    print(f"Using{torch.cuda.device_count()} GPUs!")
-     #   model = nn.DataParallel(model)
+    if torch.cuda.device_count() > 1:
+       print(f"Using{torch.cuda.device_count()} GPUs!")
+       model = nn.DataParallel(model)
+    print(f"Putting model on :{device}")
+    model.to(device)
     optim = torch.optim.Adam(model.parameters(), lr=0.0001,weight_decay=0.0001)
 
    
@@ -594,9 +595,9 @@ if __name__ == "__main__":
     args ={
         "MCTS_UCT_c" : 4,
         "MCTS_constraint": "rollouts",
-        "MCTS_budget": 100,
+        "MCTS_budget": 10,
         "MCTS_dirichlet_alpha": 1,
-        "num_self_play_iterations":100,
+        "num_self_play_iterations":12,
         "max_moves_num_selfplay": 50,
         "num_learning_iterations": 5,
         "num_epochs": 5,
@@ -607,7 +608,7 @@ if __name__ == "__main__":
     #Save training hyperparamaters
     model_saving_path = Utils.create_model_folder(args)
 
-    train_pipe = AlphaZero(model,optimizer=optim,game=game,device=device,args=args,model_saving_path=model_saving_path)
+    train_pipe = AlphaZero(model,optimizer=optim,game=game,device=device,cpu_device = cpu_dev,args=args,model_saving_path=model_saving_path)
 
     #Start AlphaZero
     start = time.time()
