@@ -72,6 +72,8 @@ class MCTS:
                         tensor_state = torch.tensor(next.state.astype(np.float32))
                         tensor_state= torch.permute(tensor_state,(2,0,1)).unsqueeze(0)
                         policy, state_value = self.neural_net(tensor_state)
+                        policy = torch.nn.functional.softmax(policy, dim=1)
+                        
                         policy = policy.numpy().squeeze()
                         state_value = state_value.item()
                         #normalize probabilities over possible game states
@@ -162,13 +164,26 @@ class MCTS:
         return best_child,action_probs  
             
     
-    def truncate_tree(self, old_root,new_root):
+    def truncate_tree(self, old_root,new_root,playing_against_random=False,new_state=None):
         """
         Looks for action that was taken by opponent and returns truncated
         tree, so that new root node state is derived by previous action taken by opponent.
         Use this function only when playing against other player. If you want MCTS to play
         against itself don't use this!
         """
+        #Truncation when playing against random agent, new root is actually action taken by random agent
+        if playing_against_random: #We are waching new_root as action
+            if (new_root is not None):
+                if not old_root.children:
+                    return Node(new_state,None)
+                for child in old_root.children:
+                    if child.action == new_root:
+                        child.state = new_state
+                        return child
+            else:
+                return old_root
+
+        #Truncaton when playing against another MCTS agent
         if new_root.children: 
             if not old_root.children:
                 return Node(new_root.state,None)
