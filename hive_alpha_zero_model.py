@@ -14,6 +14,7 @@ import torch.nn.functional as F
     - play with (decrease?) hyperparameters (n_filters, n_res_layers, value_fc_size)
         - also batch_norm_kwargs - we're using keras defaults; maybe change to torch defaults?
     - change action shape from 22x22x7 to 22x22x6?
+    - kernel_size=(3,2) gives (reversed) padding=[0,1,1,1] which is probably what we need
 """
 
 class ResidualBlock(nn.Module):
