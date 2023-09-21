@@ -14,9 +14,6 @@ import torch.nn.functional as F
     - play with (decrease?) hyperparameters (n_filters, n_res_layers, value_fc_size)
         - also batch_norm_kwargs - we're using keras defaults; maybe change to torch defaults?
     - change action shape from 22x22x7 to 22x22x6?
-    - circular padding in input layer
-    - consider changing shapes of input and output (it should be channel first instead of last?)
-        ^ fixed, let's see if it works
 """
 
 class ResidualBlock(nn.Module):
@@ -86,7 +83,7 @@ class HiveAlphaZeroModel(nn.Module):
         batch_norm_kwargs = dict(eps=1e-3, momentum=0.99)
 
         self.input_block = nn.Sequential(
-            nn.Conv2d(state_n_channels, n_filters, padding="same", kernel_size=input_filter_size, bias=False),
+            nn.Conv2d(state_n_channels, n_filters, padding="same", padding_mode="circular", kernel_size=input_filter_size, bias=False),
             nn.BatchNorm2d(n_filters, **batch_norm_kwargs),
             nn.ReLU()
         )
