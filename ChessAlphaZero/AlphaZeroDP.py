@@ -77,7 +77,7 @@ def self_play(game_id,game_env_ref,nn_ref,args_ref):
     game_copy = deepcopy(game_env_ref)
     initial_state = game_copy.reset()
     mcts = MCTS(game_copy,UCT_c=args_ref["MCTS_UCT_c"],constraint=args_ref["MCTS_constraint"],
-                budget=args_ref["MCTS_budget"],neural_network=nn_ref,dirichlet_alpha=args["MCTS_dirichlet_alpha"])
+                budget=args_ref["MCTS_budget"],neural_network=nn_ref,dirichlet_alpha=args_ref["MCTS_dirichlet_alpha"])
     
     root = Node(initial_state,None)
     turn_cnt =0
@@ -114,7 +114,7 @@ def self_play(game_id,game_env_ref,nn_ref,args_ref):
             if data[2]==1:#white was on move
                 data[2]=-1 
             else:#black was on move
-                data[2]=-1
+                data[2]=1
         elif game_outcome==0: #draw
             data[2]=0
         else:
@@ -132,7 +132,7 @@ def evaluate_model(game_id,game_env_ref,new_nn_ref,old_nn_ref,args_ref):
     #print(f"Game:{game_id}")
     game_copy = deepcopy(game_env_ref)
     mcts = MCTS(game_copy,UCT_c=args_ref["MCTS_UCT_c"],constraint=args_ref["MCTS_constraint"],
-                budget=args_ref["MCTS_budget"],neural_network=new_nn_ref,dirichlet_alpha=args["MCTS_dirichlet_alpha"])
+                budget=args_ref["MCTS_budget"],neural_network=new_nn_ref,dirichlet_alpha=args_ref["MCTS_dirichlet_alpha"])
     
     initial_state = game_copy.reset()
     node1 = Node(initial_state,None)
@@ -192,7 +192,7 @@ def play_against_random(game_id,game_env_ref,nn_ref,args_ref):
     #print(f"Game:{game_id}")
     game_copy = deepcopy(game_env_ref)
     mcts = MCTS(game_copy,UCT_c=args_ref["MCTS_UCT_c"],constraint=args_ref["MCTS_constraint"],
-                budget=args_ref["MCTS_budget"],neural_network=nn_ref,dirichlet_alpha=args["MCTS_dirichlet_alpha"])
+                budget=args_ref["MCTS_budget"],neural_network=nn_ref,dirichlet_alpha=args_ref["MCTS_dirichlet_alpha"])
     
     initial_state = game_copy.reset()
     node1 = Node(initial_state,None)
