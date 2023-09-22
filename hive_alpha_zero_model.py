@@ -46,7 +46,7 @@ class HiveAlphaZeroModel(nn.Module):
     """Class for predicting the output of policy and value functions given a Hive board state."""
     def __init__(
         self,
-        state_shape=(18,23,23),
+        state_shape=(36,23,23),
         action_prob_shape=(7,22,22),
         policy_n_filters=2,
         value_n_filters=4,
