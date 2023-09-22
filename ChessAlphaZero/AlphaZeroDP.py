@@ -581,9 +581,10 @@ if __name__ == "__main__":
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     
     model = DummyNN(10,64)
-    if torch.cuda.device_count() > 1:
-       print(f"Using{torch.cuda.device_count()} GPUs!")
-       model = nn.DataParallel(model)
+
+    print(f"Using {torch.cuda.device_count()} GPUs!")
+    model = nn.DataParallel(model)
+
     print(f"Putting model on :{device}")
     model.to(device)
     optim = torch.optim.Adam(model.parameters(), lr=0.0001,weight_decay=0.0001)
