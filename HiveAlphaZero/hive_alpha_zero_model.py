@@ -46,7 +46,7 @@ class HiveAlphaZeroModel(nn.Module):
     """Class for predicting the output of policy and value functions given a Hive board state."""
     def __init__(
         self,
-        state_shape=(18,23,23),
+        state_shape=(36,23,23),
         action_prob_shape=(7,22,22),
         policy_n_filters=2,
         value_n_filters=4,
@@ -77,6 +77,9 @@ class HiveAlphaZeroModel(nn.Module):
         value_fc_size: int
     ):
         """Build the torch model."""
+        if input_filter_size % 2 == 0:
+            raise ValueError("input_filter_size must an uneven number in order to ensure even padding")
+
         state_n_channels = state_shape[0]
 
         # keras defaults
@@ -88,10 +91,10 @@ class HiveAlphaZeroModel(nn.Module):
             nn.ReLU()
         )
 
-        self.res_blocks = nn.ModuleList((
+        self.res_blocks = nn.ModuleList(
             ResidualBlock(n_filters, filter_size, **batch_norm_kwargs)
             for _ in range(n_res_layers)
-        ))
+        )
 
         state_plane_size = np.prod(state_shape[1:])
 
