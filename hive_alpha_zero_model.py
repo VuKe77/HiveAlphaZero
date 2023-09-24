@@ -78,7 +78,7 @@ class HiveAlphaZeroModel(nn.Module):
     ):
         """Build the torch model."""
         if input_filter_size % 2 == 0:
-            raise ValueError("input_filter_size must an even number in order to ensure even padding")
+            raise ValueError("input_filter_size must an uneven number in order to ensure even padding")
 
         state_n_channels = state_shape[0]
 
