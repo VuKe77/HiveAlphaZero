@@ -14,7 +14,7 @@ import torch.nn.functional as F
     - play with (decrease?) hyperparameters (n_filters, n_res_layers, value_fc_size)
         - also batch_norm_kwargs - we're using keras defaults; maybe change to torch defaults?
     - change action shape from 22x22x7 to 22x22x6?
-    - change state shape from 23x23x36 back to 23x232x18?
+    - change state shape from 23x23x36 back to 23x23x18?
     - use graph networks
 """
 
