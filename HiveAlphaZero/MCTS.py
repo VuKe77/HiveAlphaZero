@@ -21,12 +21,7 @@ class MCTS:
     def __init__(self, game_env, UCT_c,constraint = "rollouts", budget = 2000,neural_network=None,UCT_eps=0.25,dirichlet_alpha=None):
         
         self.game_env = game_env #game environment 
-        self.game_snapshot = None
-        """
-        Functions that game_env shoud have in order for compatibility:
-        .step(next.action)=> gives next_state, reward, terminated(True/False)
-        .legal_actions=> returns legal actions that can be taken from current game state
-        """
+        self.game_snapshot = None 
         self.constraint = constraint #Can be "time" or "rollouts"
         self.budget = budget #time in seconds or number of rollouts
         self.UCT_c = UCT_c #UCT constant
@@ -35,17 +30,25 @@ class MCTS:
         self.neural_net  = neural_network
         self.visited_nodes = [] #nodes visited during one Tree sweep
         self.valid_actions = [0]*3388 #TODO: specific for Chess action space
-        self.tau = 1
+        self.tau = 1 #Temperature parameter
     
     @torch.no_grad()
     def search_tree(self, root, print_tree = False):
         """
         Main function for MCTS. Does all four stages of MCTS for given root.
         1)Selection is done using tree_policy function
-        2)Expansion is done by first adding all possible children nodes to leaf and 
-        selecting random children for simulation
-        3)Simulation is done upon random children using  random rollouts as default policy
+        2)Expansion is done by:
+        if NN is available:
+            expanding tree with children(all possible actions) and adding their prior probabilities, calculated via NN
+        if NN is not available:
+            first adding all possible children nodes to leaf and  selecting random children for simulation
+        3)Simulation:
+        if NN is available:
+            NN is used for predicting state value, which is use in backpropagation as reward
+        if NN is not available:
+            done upon random children using  random rollouts as default policy
         4)Backpropagation is done using reward_backpropagete function
+        
         Number of search iterations is determined by self.budget
         """
         run_search = True
@@ -53,18 +56,18 @@ class MCTS:
         start_time= time.time()
         while run_search:
 
-            self.game_snapshot =self.game_env.getSnapshot() #Make deep copy of game for tree search#TODO: Specific to Hive
+            self.game_snapshot =self.game_env.getSnapshot() #Make deep copy of game for tree search #TODO: Specific to Hive
             next = root
             self.visited_nodes = []  
-            #terminated=False
             game_outcome=0 #game_outcome has following values: 0(running),1(white won), 2(black won), 3(draw)
             state_value=0
             while not game_outcome:
-                if len(next.children)==0: 
+                #Leaf doesn't have children, expand it
+                if not next.children: 
                     self.visited_nodes.append(next)
                     self.valid_actions =[0]*3388 #TODO:Specific to Hive 
             
-                    #expanding node for all possible actions if it isn't expanded and doing rollouts on random child or using NN 
+                    #expanding node for all possible actions if it isn't expanded
                     self._add_leaf_nodes(next)
                     
                     #Use NN for prediciton if possible
@@ -79,16 +82,13 @@ class MCTS:
                         state_value = state_value.item()
                         
                         if self.valid_actions: #valid_actions will be None if player needs to pass move
-                            #normalize probabilities over possible game states
+                            #normalize probabilities over possible game states for valid actions
                             policy*=self.valid_actions
                             policy = policy/np.sum(policy) 
                         
                             #Give corresponding prior prob to every child of node:
                             for child in next.children:
-                                child.prior_prob = policy[child.action]
-                        else:
-                            print("NO VALID ACTION, PASS")
-
+                                child.prior_prob = policy[child.action]                  
                     else:
                         #Doing random rollouts
                         
@@ -121,7 +121,6 @@ class MCTS:
                     
 
             #Backpropagation
-            #TODO: Chess environment returns outcome in format:0(white wins), -1(black wins), 0(draw)
             #TODO: Hive environment returns outcome in format:1(white wins), 2(black wins), 3(draw)
             if game_outcome:
                 self.visited_nodes.append(next)#If game was terminated we need to add terminal node to visited nodes
@@ -154,18 +153,17 @@ class MCTS:
 
         best_child = None
         action_probs = [0]*3388 #TODO: Specific to Hive
-        #IMPORTANT: We assume that nodes are so arranged that first child node is first possible action and last child node is last possible action!
-        #Should be true, check it! #TODO:
         actions = []
         if self.neural_net:
             #Case when player needs to pass(root has only one child which is forced play)
             if len(root.children)==1 and root.children[0].action==-1:
-                return root.children[0], action_probs #We will return all zeros as action_probs
+                return root.children[0], action_probs #We will return all zeros as action_probs, because we don't have pass in action space
             
 
             for child in root.children:
-                action_probs[child.action]=child.visit_cnt**(1/self.tau)
-                actions.append(child.visit_cnt**(1/self.tau))
+                result = child.visit_cnt**(1/self.tau)
+                action_probs[child.action]= result
+                actions.append(result)
             action_probs= action_probs/np.sum(action_probs)
             actions = actions/np.sum(actions)
             best_child = np.random.choice(root.children,p=actions)
@@ -180,6 +178,8 @@ class MCTS:
             most_visits_idx = np.argmax(action_probs)
             action_probs = [0]*3388 #TODO: specific to Hive
             action_probs[most_visits_idx] = 1
+        
+        best_child.parent = None
 
         return best_child,action_probs  
             
@@ -213,9 +213,7 @@ class MCTS:
                     return child
         else:
             return old_root
-
-
-        
+   
     def _tree_policy(self, node):
         """
         Tree policy for selecting nodes inside of tree using UCT
@@ -235,7 +233,6 @@ class MCTS:
         argmax = np.argmax(UCT_scores)
         #self.visited_nodes.append(node.children[argmax])
         return node.children[argmax]
-
 
     def _calculate_UCT_score(self,node,noise):
         """
@@ -269,7 +266,7 @@ class MCTS:
         """
         next_possible_actions = self.game_snapshot.getLegalMoves()
         #Case when player can't play, and needs to pass
-        if len(next_possible_actions)==0:
+        if not next_possible_actions:
             self.valid_actions=None
             child_node = Node(None,node,-1,prior_p=1) #Action -1 defines passing move! It's prior prob is 1!
             node.children.append(child_node)
@@ -279,8 +276,6 @@ class MCTS:
             self.valid_actions[action] =1
             node.children.append(Node(None,node,action))
 
-
-    
     def _random_rollout(self, node):
         """
         Doing random moves until game terminates on selected node. 
@@ -337,7 +332,6 @@ class MCTS:
         #root.visit_cnt+=1
         #root.total_reward = root.total_reward + reward
 
-
     def _computational_budget(self,search_iteration, start_time):
         """
         Takes number of search iterations and starting time of search
@@ -351,7 +345,7 @@ class MCTS:
             if (time.time()-start_time)>self.budget:
                 return(False,time.time()-start_time)
         return (True,0)
-
+    
     def _print_tree(self, root, delta_time,rollout_number):
         """
         Prints tree of possible actions from root.
@@ -373,17 +367,16 @@ class MCTS:
     
     def set_new_model(self,model):
         self.neural_net = model
-        
 
-
-
+    def set_tau(self,new_tau):
+        self.tau = new_tau     
 
 class Node:
     """
     One node of MCTS tree
     """
     index=0 #For debugging
-    def __init__(self,state,parent ,action=None,prior_p=1):
+    def __init__(self,state,parent ,action=None,prior_p=None):
         self.state = state
         self.total_reward = 0
         self.visit_cnt = 0
