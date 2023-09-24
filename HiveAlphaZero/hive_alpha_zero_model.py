@@ -23,11 +23,17 @@ class ResidualBlock(nn.Module):
     def __init__(self, n_filters: int, filter_size: int, **batch_norm_kwargs):
         super().__init__()
 
-        self.conv_1 = nn.Conv2d(n_filters, n_filters, kernel_size=filter_size, padding="same", bias=False)
-        self.batch_norm_1 = nn.BatchNorm2d(n_filters, **batch_norm_kwargs)
+        res_layers = tuple(self._make_res_layer(n_filters, filter_size, **batch_norm_kwargs) for _ in range(2))
 
-        self.conv_2 = nn.Conv2d(n_filters, n_filters, kernel_size=filter_size, padding="same", bias=False)
-        self.batch_norm_2 = nn.BatchNorm2d(n_filters, **batch_norm_kwargs)
+        self.conv_1, self.batch_norm_1 = res_layers[0]
+        self.conv_2, self.batch_norm_2 = res_layers[1]
+
+    @staticmethod
+    def _make_res_layer(n_filters, filter_size, **batch_norm_kwargs):
+        conv = nn.Conv2d(n_filters, n_filters, kernel_size=filter_size, padding="same", bias=False)
+        batch_norm = nn.BatchNorm2d(n_filters, **batch_norm_kwargs)
+
+        return conv, batch_norm
 
     def forward(self, x):
         """Forward the input of the residual block."""
