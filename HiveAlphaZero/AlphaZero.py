@@ -40,7 +40,7 @@ def self_play(game_id,nn_ref,args_ref):
             break #early termination 
         #After 30 moves set tau(temperature in MCTS) to really small value, like in original AlphaZero
         if move_cnt ==30:
-            mcts.set_tau(1e-2)
+            mcts.set_tau(1e-1)
 
 
         old_state = root.state
@@ -115,8 +115,8 @@ def evaluate_model(game_id,new_nn_ref,old_nn_ref,args_ref):
 
         #After 30 moves set tau(temperature in MCTS) to really small value, like in original AlphaZero
         if move_cnt ==30:
-            mcts1.set_tau(1e-2)
-            mcts2.set_tau(1e-2)
+            mcts1.set_tau(1e-1)
+            mcts2.set_tau(1e-1)
 
         if player=='1':
             node1 = mcts1.truncate_tree(node1,node2)
@@ -181,8 +181,8 @@ def play_against_random(game_id,nn_ref,args_ref):
             terminated=3
             break
          #After 30 moves set tau(temperature in MCTS) to really small value, like in original AlphaZero
-        if move_cnt ==10:
-            mcts.set_tau(1e-2)
+        if move_cnt ==30:
+            mcts.set_tau(1e-1)
 
         if player=='1':
             node1 = mcts.truncate_tree(node1,randomAgent_action,playing_against_random=True,new_state=new_state)
@@ -367,7 +367,7 @@ class AlphaZero:
         time1 = time.time()
         print("Self-playing phase starts...")
         #Utilising resources
-        workers = round(mp.cpu_count()*0.5)
+        workers = round(mp.cpu_count()*0.85)
         if workers>self.args["num_self_play_iterations"]:
             workers = self.args["num_self_play_iterations"]
       
@@ -556,17 +556,17 @@ if __name__ == "__main__":
 
     
     args ={
-        "MCTS_UCT_c" : 4,
+        "MCTS_UCT_c": 4,
         "MCTS_constraint": "rollouts",
-        "MCTS_budget": 10,
+        "MCTS_budget": 2000,
         "MCTS_dirichlet_alpha": 1,
-        "num_self_play_iterations":10,
+        "num_self_play_iterations": 220,
         "max_moves_num_selfplay": 60,
         "num_learning_iterations": 10,
         "num_epochs": 100,
-        "batch_size":64,
-        "num_evaluation_games":0,
-        "num_games_against_random":20
+        "batch_size": 64,
+        "num_evaluation_games": 0,
+        "num_games_against_random": 20
     }
     #Save training hyperparamaters
     model_saving_path = Utils.create_model_folder(args)
