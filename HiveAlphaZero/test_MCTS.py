@@ -50,7 +50,10 @@ terminated=False
 while not terminated:
     node1,p1 = mcts.search_tree(node1,True)
     action_taken = node1.action
-    env.step(action_taken) #No Pass?
+    if action_taken ==-1:
+        env.stepPass()
+    else:
+        env.step(action_taken) 
     terminated = env.getGameStatus()
 
 print(terminated)
