@@ -23,7 +23,9 @@ class ResidualBlock(nn.Module):
     def __init__(self, n_filters: int, filter_size: int, **batch_norm_kwargs):
         super().__init__()
 
-        res_layers = tuple(self._make_res_layer(n_filters, filter_size, **batch_norm_kwargs) for _ in range(2))
+        res_layers = tuple(
+                            self._make_res_layer(n_filters, filter_size, **batch_norm_kwargs)
+                            for _ in range(2))
 
         self.conv_1, self.batch_norm_1 = res_layers[0]
         self.conv_2, self.batch_norm_2 = res_layers[1]
