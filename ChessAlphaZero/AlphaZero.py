@@ -4,6 +4,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.optim.lr_scheduler import LambdaLR
 from MCTS import MCTS
 from MCTS import Node
 import time
@@ -13,128 +14,88 @@ from tqdm import tqdm
 import multiprocessing as mp
 from ray.util.multiprocessing import Pool
 import ray
+import FlashO1
 
-
-
-class DummyNN(nn.Module):
-    def __init__(self,num_resBlocks,num_hidden):
-        super().__init__()
-        self.startBlock = nn.Sequential(
-            nn.Conv2d(119,num_hidden,kernel_size=3,padding=1),
-            nn.BatchNorm2d(num_hidden),
-            nn.ReLU(),
-        )
-        self.backBone = nn.ModuleList(
-            [DummyResBlock(num_hidden) for i in range(num_resBlocks)]
-        )
-        self.policyHead = nn.Sequential(
-            nn.Conv2d(num_hidden,out_channels=num_hidden,kernel_size=3,padding=1),
-            nn.BatchNorm2d(num_hidden),
-            nn.ReLU(),
-            nn.Flatten(),
-            nn.Linear(num_hidden*8*8,4672)
-            
-        )
-        self.valueHead = nn.Sequential(
-            nn.Conv2d(num_hidden,3,kernel_size=3,padding=1),
-            nn.BatchNorm2d(3),
-            nn.ReLU(),
-            nn.Flatten(),
-            nn.Linear(3*8*8,1),
-            nn.Tanh()
-        )
-
-    def forward(self,x):
-       # print(f"In Model: input size: {x.size()}")
-        x = self.startBlock(x)
-        policy = self.policyHead(x)
-        value = self.valueHead(x)
-       # print(f"Out Model: output size: {value.size()}")
-        return policy, value
-class DummyResBlock(nn.Module):
-    """
-    One block of residual layers
-    """
-    def __init__(self, num_hidden):
-        super().__init__()
-        self.conv1 = nn.Conv2d(num_hidden,num_hidden,kernel_size=3,padding=1)
-        self.bn1 = nn.BatchNorm2d(num_hidden)
-        self.conv2 = nn.Conv2d(num_hidden,num_hidden,kernel_size=3,padding=1)
-        self.bn2 = nn.BatchNorm2d(num_hidden)
-
-    def forward(self, x):
-        residual = x
-        x = F.relu(self.bn1(self.conv1(x)))
-        x = self.bn2(self.conv2(x))
-        x += residual
-        x = F.relu(x)
-        return x
 
 @ray.remote
-def self_play(game_id,game_env_ref,nn_ref,args_ref):
+def self_play(game_id,nn_ref,args_ref):
 
-    #print(f"Game:{game_id}")
-    game_copy = deepcopy(game_env_ref)
-    initial_state = game_copy.reset()
-    mcts = MCTS(game_copy,UCT_c=args_ref["MCTS_UCT_c"],constraint=args_ref["MCTS_constraint"],
+    if game_id%10 ==0: #Print every 10th game id
+        print(f"Game:{game_id}")
+    game_env = FlashO1.FlashO1()
+    game_env.startAs(6) #TODO: Look what piece will you place here! (6 should be Grasshopper)
+    initial_state = game_env.getBoardState()
+    mcts = MCTS(game_env,UCT_c=args_ref["MCTS_UCT_c"],constraint=args_ref["MCTS_constraint"],
                 budget=args_ref["MCTS_budget"],neural_network=nn_ref,dirichlet_alpha=args_ref["MCTS_dirichlet_alpha"])
     
     root = Node(initial_state,None)
-    turn_cnt =0
+    move_cnt =0
     one_game_data = []
-    terminated = False
+    terminated = 0 #0(running), 1(white wins), 2(black wins), 3(draw)
     while not terminated:
         #Playout the game and save game trajectories
         
-        if turn_cnt==args_ref["max_moves_num_selfplay"]:
-            terminated = True
+        if move_cnt==args_ref["max_moves_num_selfplay"]:
+            terminated = 3 #draw
             break #early termination 
+        #After 30 moves set tau(temperature in MCTS) to really small value, like in original AlphaZero
+        if move_cnt ==30:
+            mcts.set_tau(1e-1)
+
 
         old_state = root.state
-        player = root.state[:,:,112][0][0] #TODO: Specific for Chess, rework for another game
+        player = game_env.isWhiteToPlay() #TODO: Specific for Hive, rework for another game
         root, action_prob = mcts.search_tree(root)
-        new_state,game_outcome,terminated,info = game_copy.step(root.action)
 
+        if root.action==-1:
+            game_env.stepPass() 
+        else:
+            game_env.step(root.action)
+
+        terminated = game_env.getGameStatus()
+        
+        #Save turn data
         one_game_data.append([old_state,action_prob,player]) #We are currently saving player in place of reward, when game is over we replace it with reward
-        turn_cnt+=1
-        #print(f"GAME INDEX:{index}:")
-        #print(game_copy.render(mode='unicode'))
+        move_cnt+=1
 
 
-    #When game is over add reward to one_game_data instead of player => P1 win(+1), P2 win(-1), draw(+0)
-    #TODO: specific for Chess
+    #When game is over add reward to one_game_data instead of player
+    #TODO: specific for Hive
     
     for data in one_game_data:
-        if game_outcome==1: #white player wins
-            if data[2]==1: #white was on move
+        if terminated ==3: #draw
+            data[2] = 0
+        elif terminated==1: #white player wins
+            if data[2]==True: #white was on move
                 data[2]=1
             else: #black was on move
                 data[2]=-1
-        elif game_outcome ==-1: #black player wins
-            if data[2]==1:#white was on move
+        elif terminated ==2: #black player wins
+            if data[2]==True:#white was on move
                 data[2]=-1 
             else:#black was on move
                 data[2]=1
-        elif game_outcome==0: #draw
-            data[2]=0
         else:
             raise ValueError("Uncategorized winner!")
-            
     return one_game_data
 
 @ray.remote
-def evaluate_model(game_id,game_env_ref,new_nn_ref,old_nn_ref,args_ref):
+def evaluate_model(game_id,new_nn_ref,old_nn_ref,args_ref):
     """
     Plays out game with new model and old model, to see which is better. Using
     args_ref in order to set up MCTS for evaluation.
     """
     #Set parameters for  evaluation with MCTS
-    #print(f"Game:{game_id}")
-    game_copy = deepcopy(game_env_ref)
-    mcts = MCTS(game_copy,UCT_c=args_ref["MCTS_UCT_c"],constraint=args_ref["MCTS_constraint"],
+    print(f"Game:{game_id}")
+    game_copy =  FlashO1.FlashO1()
+    mcts1 = MCTS(game_copy,UCT_c=args_ref["MCTS_UCT_c"],constraint=args_ref["MCTS_constraint"],
+                budget=args_ref["MCTS_budget"],neural_network=old_nn_ref,dirichlet_alpha=args_ref["MCTS_dirichlet_alpha"])
+    
+    mcts2 = MCTS(game_copy,UCT_c=args_ref["MCTS_UCT_c"],constraint=args_ref["MCTS_constraint"],
                 budget=args_ref["MCTS_budget"],neural_network=new_nn_ref,dirichlet_alpha=args_ref["MCTS_dirichlet_alpha"])
     
-    initial_state = game_copy.reset()
+    game_copy.startAs(6) #TODO: Look what piece will you place here! (2 should be grasshopper)
+    initial_state = game_copy.getBoardState()
     node1 = Node(initial_state,None)
     node2 = Node(initial_state,None)
 
@@ -146,59 +107,66 @@ def evaluate_model(game_id,game_env_ref,new_nn_ref,old_nn_ref,args_ref):
 
     #Playout games
     move_cnt=0
-    terminated = False
+    terminated = 0
     while not terminated:
         if move_cnt==args_ref["max_moves_num_eval"]:
+            terminated=3
             break
 
+        #After 30 moves set tau(temperature in MCTS) to really small value, like in original AlphaZero
+        if move_cnt ==30:
+            mcts1.set_tau(1e-1)
+            mcts2.set_tau(1e-1)
+
         if player=='1':
-            mcts.set_new_model(old_nn_ref) #set old model for MCTs
-            node1 = mcts.truncate_tree(node1,node2)
-            node1,a1 = mcts.search_tree(node1)
+            node1 = mcts1.truncate_tree(node1,node2)
+            node1,a1 = mcts1.search_tree(node1)
             player = '2'
             action_taken = node1.action
             
         elif player =='2':
-            mcts.set_new_model(new_nn_ref) #set new model for MCTs
-            node2 = mcts.truncate_tree(node2,node1)
-            node2,a2 = mcts.search_tree(node2)
+            node2 = mcts2.truncate_tree(node2,node1)
+            node2,a2 = mcts2.search_tree(node2)
             player = '1'
             action_taken = node2.action
 
-        new_state,game_outcome,terminated,info = game_copy.step(action_taken)
+        if action_taken==-1:
+            game_copy.stepPass() 
+        else:
+            game_copy.step(action_taken)
+
+        terminated = game_copy.getGameStatus()
         move_cnt+=1
 
     #Check what NN won the game:
-    if game_outcome == 0: #draw
+    if terminated == 3: #draw
         return 0
-    elif game_outcome ==1: #white wins
+    elif terminated ==1: #white wins
         if game_id%2 ==0: #old model is white 
             return -1
         else:
             return 1
-
-    elif game_outcome == -1: #black wins
+    elif terminated == 2: #black wins
         if game_id%2 ==0: #old model white
             return 1
         else:
             return -1
-    
     else:
-        raise ValueError("Invalid outcome!")
+        raise ValueError("Invalid outcome!") 
 
 @ray.remote
-def play_against_random(game_id,game_env_ref,nn_ref,args_ref):
+def play_against_random(game_id,nn_ref,args_ref):
 
     #print(f"Game:{game_id}")
-    game_copy = deepcopy(game_env_ref)
+    game_copy = FlashO1.FlashO1()
+    game_copy.startAs(6) #TODO: Look what piece will you place here! (6 should be Grasshopper)
+    initial_state = game_copy.getBoardState()
     mcts = MCTS(game_copy,UCT_c=args_ref["MCTS_UCT_c"],constraint=args_ref["MCTS_constraint"],
                 budget=args_ref["MCTS_budget"],neural_network=nn_ref,dirichlet_alpha=args_ref["MCTS_dirichlet_alpha"])
     
-    initial_state = game_copy.reset()
     node1 = Node(initial_state,None)
-    randomAgent_action = None 
+    randomAgent_action = None
     new_state=None
-
     #select starting player
     if game_id%2==0:
         player='1' #first_player = "NN"
@@ -207,11 +175,14 @@ def play_against_random(game_id,game_env_ref,nn_ref,args_ref):
         player='2' #first_player="RANDOM"
            
     move_cnt =0
-    terminated = False
+    terminated = 0 #0(running), 1(white wins), 2(black wins), 3(draw)
     while not terminated:
         if move_cnt==args_ref["max_moves_num"]:
-            game_outcome=0
+            terminated=3
             break
+         #After 30 moves set tau(temperature in MCTS) to really small value, like in original AlphaZero
+        if move_cnt ==30:
+            mcts.set_tau(1e-1)
 
         if player=='1':
             node1 = mcts.truncate_tree(node1,randomAgent_action,playing_against_random=True,new_state=new_state)
@@ -220,26 +191,37 @@ def play_against_random(game_id,game_env_ref,nn_ref,args_ref):
             player = '2'
             
         elif player =='2':
-            action_taken = random.choice(game_copy.legal_actions)
+            legal_moves = game_copy.getLegalMoves()
+            if not legal_moves:
+                action_taken = -1 #Pass if no legal moves are available
+            else:
+                action_taken = random.choice(legal_moves)
+
             randomAgent_action = action_taken
             player = '1'
 
-        new_state,game_outcome,terminated,info = game_copy.step(action_taken)
+        #Do step in the game
+        if action_taken==-1:
+            game_copy.stepPass()
+        else:
+            game_copy.step(action_taken)
+        terminated = game_copy.getGameStatus()
+        new_state = game_copy.getBoardState()
         move_cnt+=1
     #determine reward
-    if game_outcome==0:
+    if terminated==3: #draw
         return 0
 
-    elif game_outcome==1:#white wins
+    elif terminated==1:#white wins
         if game_id%2==0: #White player is NN
             return 1
         else:
             return -1
-    elif game_outcome ==-1:#black wins
-        if game_id%2==1:#white player is random
-            return 1
-        else:
+    elif terminated ==2:#black wins
+        if game_id%2==0:#white player is NN
             return -1
+        else:
+            return 1
     else:
         raise ValueError("Uncategorized winner")
     
@@ -250,15 +232,15 @@ def play_against_random(game_id,game_env_ref,nn_ref,args_ref):
 
 
 class AlphaZero:
-    def __init__(self,model, optimizer, game,device, args,model_saving_path):
+    def __init__(self,model, optimizer,cpu,gpu, args,model_saving_path):
         """
         Training pipeline class for AlphaZero alghorihm.
         """
-        self.device = device 
+        self.cpu_device = cpu
+        self.gpu_device = gpu
         self.model = model
         self.old_model = None 
         self.optimizer = optimizer
-        self.game = game
         self.args = args
         self.model_saving_path = model_saving_path #Path for saving our model
         ''' ARGS:
@@ -278,51 +260,7 @@ class AlphaZero:
         -num_games_against_random: number of games played against random agent in order to check reward
 
         ''' 
-    def _parallel_self_play(self):
-        """
-        Performs number of self-play games defined in args["num_self_play_iterations"]. Every self-play game has early  
-        termination if number of moves exceeds args["max_move_num"] . Returns vector containing every game trajectory, where  
-        every move is in format [state of game, posterior action probs, reward]. Data acquisition is done in parallel using
-        multiple python processes.
-        """
-        time1 = time.time()
-        print("Self-playing phase starts...")
-        #Utilising resources
-        workers = round(mp.cpu_count()*0.5)
-        if workers>self.args["num_self_play_iterations"]:
-            workers = self.args["num_self_play_iterations"]
-        print(f"Using {workers} CPU cores...")
-        #Rounding batch size in order to fully utilise resources
-        BATCH_SIZE = self.args["num_self_play_iterations"]//workers*workers #batch size is number of self played games
-
-        #Run multiple processes and acquire data
-        not_ready =[] 
-        ready=[]
-        data = []
-        model_ref = ray.put(self.model)
-        game_ref = ray.put(self.game)
-        args_ref = ray.put(self.args)
-        games_played = 0
-
-        while(games_played<BATCH_SIZE):
-            if len(not_ready)>=workers:
-                ready, not_ready = ray.wait(not_ready,num_returns=1)
-                data+=deepcopy(ray.get(ready[0]))
-
-            not_ready.append(self_play.remote(games_played+1,game_ref,model_ref,args_ref))
-            games_played+=1
-
-        #Get remaining  data
-        for i in range(workers):
-            data+=deepcopy(ray.get(not_ready[i]))
-        #del ready
-        #del not_ready
-        #del dummy_model_ref
-        #del game_ref
-        print(f"Self-play finished. Played out {BATCH_SIZE} games.")
-        print(f"Time needed for {BATCH_SIZE} games is: {time.time()-time1:.2f}s")
-        return data
-
+ 
    
     def _train(self, memory):
         """
@@ -343,22 +281,23 @@ class AlphaZero:
             states, policy_targets, value_targets = np.array(states), np.array(policy_targets), np.array(value_targets).reshape(-1,1) #TODO:need this?
             
             #Turn into tensors, prepare for NN
+            
             states = torch.tensor(states,dtype=torch.float32)
             states =torch.permute(states,(0,3,1,2))
             policy_targets = torch.tensor(policy_targets,dtype=torch.float32)
             value_targets = torch.tensor(value_targets,dtype=torch.float32)
 
             #Move it to GPU
-            states = states.to(self.device)
-            policy_targets = policy_targets.to(self.device)
-            value_targets = value_targets.to(self.device)
+            states = states.to(self.gpu_device)
+            policy_targets = policy_targets.to(self.gpu_device)
+            value_targets = value_targets.to(self.gpu_device)
             out_policy, out_value = self.model(states)
 
             policy_loss = F.cross_entropy(out_policy,policy_targets)
             value_loss = F.mse_loss(out_value, value_targets)
             loss = policy_loss+value_loss
-            cumalative_loss[0].append(policy_loss.to(cpu_dev).detach().numpy())  #used for plotting loss curve
-            cumalative_loss[1].append(value_loss.to(cpu_dev).detach().numpy())  #used for plotting loss curve
+            cumalative_loss[0].append(policy_loss.to(self.cpu_device).detach().numpy())  #used for plotting loss curve
+            cumalative_loss[1].append(value_loss.to(self.cpu_device).detach().numpy())  #used for plotting loss curve
 
             #Backpropegate
             self.optimizer.zero_grad()
@@ -377,42 +316,36 @@ class AlphaZero:
         average_policy_loss_vector = [] #Policy loss is accumulated during training phase and than averaged and appended to this vector
         average_value_loss_vector = [] #Value loss is accumulated during training phase and than averaged and appended to this vector
         reward_history=[] #After every learning iterations games are played 10 against random agent, and final reward is appended to this vector
-        self.model.to(cpu_dev) #Before start of the loop move model to CPU
-        print("Moved model to cpu")
-        print(next(model.parameters()).device)
+        self.model.eval()
+        memory=[] #vector, whos elements are self-played games.
+        #print(next(model.parameters()).device)
         for iter in tqdm(range(self.args['num_learning_iterations'])):
             
             torch.save(self.model.state_dict(),os.path.join(self.model_saving_path,"best_model"))
             torch.save(self.optimizer.state_dict(),os.path.join(self.model_saving_path,"best_optimizer"))
-            memory = [] #vector, whos elements are self-played games #TODO:Maybe put upper bound on memory limit
-
+          
             #Perform self-play to gather data for training 
-            self.model.eval()
-           
-           
+            memory = memory[round(len(memory)*0.9):]  #We are using 10% of last games for training
             memory+= self._parallel_self_play()
             
             
             #Train model on gathered data
-            self.model.to(self.device)#Move model to GPU for training
-            print("Moved model to GPU")
-            print(next(model.parameters()).device)
+            self.model.to(self.gpu_device)#Move model to GPU for training
             self.model.train()   
             print("Learning phase starts...")
-            for epoch in range(self.args["num_epochs"]):
+            for epoch in tqdm(range(self.args["num_epochs"])):
                average_loss = self._train(memory)
                average_policy_loss_vector.append(average_loss[0])
                average_value_loss_vector.append(average_loss[1])
+            self._update_lr(self.optimizer,iter)
 
             #Play with old model to evaluate NN
-            self.model.to(cpu_dev) #Move model to CPU for evaluation
-            print("Moved model to CPU")
-            print(next(model.parameters()).device)
+            self.model.to(cpu_device) #Move model to CPU for evaluation
             if self._evaluate_NN_parallel():
                 #If new model is better we will playout games against random to see who's better
                 #Play  games against random agent in order to evaluate network later
                 reward = self._play_against_random_parallel()
-                reward_history.append(reward) 
+                reward_history.append(reward)
 
 
             #save loss values and rewards during training   
@@ -423,7 +356,46 @@ class AlphaZero:
         #Save best model at the end of the training
         torch.save(self.model.state_dict(),os.path.join(self.model_saving_path,"best_model"))
         torch.save(self.optimizer.state_dict(),os.path.join(self.model_saving_path,"best_optimizer"))
-       
+
+    def _parallel_self_play(self):
+        """
+        Performs number of self-play games defined in args["num_self_play_iterations"]. Every self-play game has early  
+        termination if number of moves exceeds args["max_move_num"] . Returns vector containing every game trajectory, where  
+        every move is in format [state of game, posterior action probs, reward]. Data acquisition is done in parallel using
+        multiple python processes.
+        """
+        time1 = time.time()
+        print("Self-playing phase starts...")
+        #Utilising resources
+        workers = round(mp.cpu_count()*0.85)
+        if workers>self.args["num_self_play_iterations"]:
+            workers = self.args["num_self_play_iterations"]
+      
+        #Rounding batch size in order to fully utilise resources
+        BATCH_SIZE = self.args["num_self_play_iterations"]//workers*workers #batch size is number of self played games
+        print(f"Using {workers} CPU cores, playing out {BATCH_SIZE} games...")
+        #Run multiple processes and acquire data
+        not_ready =[] 
+        ready=[]
+        data = []
+        model_ref = ray.put(self.model)
+        args_ref = ray.put(self.args)
+        games_played = 0
+        while(games_played<BATCH_SIZE):
+            if len(not_ready)>=workers:
+                ready, not_ready = ray.wait(not_ready,num_returns=1)
+                data+=deepcopy(ray.get(ready[0]))
+
+            not_ready.append(self_play.remote(games_played+1,model_ref,args_ref))
+            games_played+=1
+
+        #Get remaining  data
+        for i in range(workers):
+            data+=deepcopy(ray.get(not_ready[i]))
+
+        print(f"Self-play finished. Played out {BATCH_SIZE} games.")
+        print(f"Time needed for {BATCH_SIZE} games is: {time.time()-time1:.2f}s")
+        return data
 
     def _evaluate_NN_parallel(self):
         """
@@ -438,7 +410,7 @@ class AlphaZero:
         print("NN evaluation phase starts...")
         time1 = time.time()
         #Utilising resources
-        workers = round(mp.cpu_count()*0.5)
+        workers = round(mp.cpu_count()*0.75)
         if workers>self.args["num_evaluation_games"]:
             workers = self.args["num_evaluation_games"]
         print(f"Using {workers} CPU cores...")
@@ -454,7 +426,7 @@ class AlphaZero:
         mcts_args ={
         "MCTS_UCT_c" : 4,
         "MCTS_constraint": "rollouts",
-        "MCTS_budget": 100,
+        "MCTS_budget": 10,
         "MCTS_dirichlet_alpha": 1,
         "max_moves_num_eval": 60,
         }
@@ -465,7 +437,6 @@ class AlphaZero:
         rewards = []
         new_model_ref = ray.put(self.model)
         old_model_ref = ray.put(self.old_model)
-        game_ref = ray.put(self.game)
         args_ref = ray.put(mcts_args)
         games_played = 0
 
@@ -474,16 +445,12 @@ class AlphaZero:
                 ready, not_ready = ray.wait(not_ready,num_returns=1)
                 rewards.append(deepcopy(ray.get(ready[0])))
 
-            not_ready.append(evaluate_model.remote(games_played+1, game_ref,new_model_ref,old_model_ref,args_ref))
+            not_ready.append(evaluate_model.remote(games_played+1,new_model_ref,old_model_ref,args_ref))
             games_played+=1
 
         #Get remaining  data
         for i in range(workers):
             rewards.append(deepcopy(ray.get(not_ready[i])))
-        #del ready
-        #del not_ready
-        #del dummy_model_ref
-        #del game_ref
         print(f"NN evaluation finished. Played out {BATCH_SIZE} games.")
         print(f"Time needed for {BATCH_SIZE} games is: {time.time()-time1:.2f}s")
 
@@ -498,15 +465,11 @@ class AlphaZero:
         else:
             print(f"Saving old model as best")
             self.model = self.old_model
-            self.optimizer.load_state_dict(torch.load("best_optimizer"))
+            self.optimizer.load_state_dict(torch.load(os.path.join(self.model_saving_path,"best_optimizer")))
             new_model_better = False
         self.old_model=None
 
         return new_model_better
-
-    
-    
-
     
     def _play_against_random_parallel(self):
         """
@@ -518,7 +481,7 @@ class AlphaZero:
         print("Reward evaluation phase starts...")
         time1 = time.time()
         #Utilising resources
-        workers = round(mp.cpu_count()*0.5)
+        workers = round(mp.cpu_count()*0.85)
         if workers>self.args["num_games_against_random"]:
             workers = self.args["num_games_against_random"]
         print(f"Using {workers} CPU cores...")
@@ -527,9 +490,9 @@ class AlphaZero:
 
         #Arguments for MCTS used for playing  against random agent
         mcts_args ={
-        "MCTS_UCT_c" : 1,
+        "MCTS_UCT_c" : 4,
         "MCTS_constraint": "rollouts",
-        "MCTS_budget":100,
+        "MCTS_budget":2000,
         "MCTS_dirichlet_alpha": 1,
         "max_moves_num": 60,
         }
@@ -539,7 +502,6 @@ class AlphaZero:
         ready=[]
         rewards= []
         model_ref = ray.put(self.model)
-        game_ref = ray.put(self.game)
         args_ref = ray.put(mcts_args)
         games_played = 0
         
@@ -548,72 +510,72 @@ class AlphaZero:
                     ready, not_ready = ray.wait(not_ready,num_returns=1)
                     rewards.append(deepcopy(ray.get(ready[0])))
 
-                not_ready.append(play_against_random.remote(games_played+1,game_ref,model_ref,args_ref))
+                not_ready.append(play_against_random.remote(games_played+1,model_ref,args_ref))
                 games_played+=1
 
             #Get remaining  data
         for i in range(workers):
             rewards.append(deepcopy(ray.get(not_ready[i])))
-        #del ready
-        #del not_ready
-        #del dummy_model_ref
-        #del game_ref
         print(f"Reward evaluation finished. Played out {BATCH_SIZE} games.")
         print(f"Time needed for {BATCH_SIZE} games is: {time.time()-time1:.2f}s")
         print(f"Total reward: {np.sum(rewards)}")
 
         return np.sum(rewards)
 
-
+    def _update_lr(self,optimizer,learning_iter):
+        """
+        Updates learning rate of optimizer
+        """
+        if learning_iter<3:
+            lr = 1e-2
+        elif learning_iter<7:
+            lr = 1e-3
+        else:
+            lr =1e-4
+        for g in optimizer.param_groups:
+            g['lr'] = lr
 
 #%%
 #TESTING OUT
 
 if __name__ == "__main__":
-    import gym
-    import gym_chess
+   
+    from Model_architecture import HiveAlphaZeroModel
     from utils import Utils
 
     ray.shutdown()
     ray.init(object_store_memory =400*1000*1000)
     print(ray.available_resources())
-    game = gym.make("ChessAlphaZero-v0")
 
-    cpu_dev = torch.device("cpu")
-    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-    model = DummyNN(10,64)
-    #if torch.cuda.device_count() > 1:
-    #    print(f"Using{torch.cuda.device_count()} GPUs!")
-     #   model = nn.DataParallel(model)
-    optim = torch.optim.Adam(model.parameters(), lr=0.0001,weight_decay=0.0001)
-
+    cpu_device = torch.device("cpu")
+    gpu_device = torch.device("cuda:0" if torch.cuda.is_available() else None)
+    model =  HiveAlphaZeroModel()
+    optim = torch.optim.SGD(model.parameters(), lr=0.01,momentum=0.9,weight_decay=1e-4)
    
 # %% TESTING OUT AlphaZero class(pipeline)
 
     
     args ={
-        "MCTS_UCT_c" : 4,
+        "MCTS_UCT_c": 4,
         "MCTS_constraint": "rollouts",
-        "MCTS_budget": 100,
+        "MCTS_budget": 1500,
         "MCTS_dirichlet_alpha": 1,
-        "num_self_play_iterations":100,
-        "max_moves_num_selfplay": 50,
-        "num_learning_iterations": 5,
-        "num_epochs": 5,
-        "batch_size":64,
-        "num_evaluation_games":5,
-        "num_games_against_random":10
+        "num_self_play_iterations": 200,
+        "max_moves_num_selfplay": 60,
+        "num_learning_iterations": 10,
+        "num_epochs": 100,
+        "batch_size": 64,
+        "num_evaluation_games": 0,
+        "num_games_against_random": 20
     }
     #Save training hyperparamaters
     model_saving_path = Utils.create_model_folder(args)
 
-    train_pipe = AlphaZero(model,optimizer=optim,game=game,device=device,args=args,model_saving_path=model_saving_path)
+    train_pipe = AlphaZero(model,optimizer=optim,cpu=cpu_device,gpu=gpu_device,args=args,model_saving_path=model_saving_path)
 
     #Start AlphaZero
     start = time.time()
     mem =train_pipe.learn()
-    for i in range(10):
-        print(i)
     print(f"Time needed to learn: {time.time()-start}")
     #Utils._plot_loss_curve(model_saving_path)
     
